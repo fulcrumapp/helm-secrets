@@ -5,43 +5,185 @@ on:
       - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
 
 name: Create Release
+run-name: Create Release ${{ github.ref_name }}
+permissions: {}
 
 jobs:
   build:
     name: Create Release
     runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      packages: write
     steps:
-      - uses: actions/checkout@v2.3.4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
-      - name: Get the version
-        id: get_version
-        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+      - name: Setup Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.0.0
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: GPG configuration
+        run: |-
+          echo "$GPG_KEY" > "$GPG_KEY_PATH"
+          mkdir -p "$HOME/.gnupg"
+          chmod 0700 "$HOME/.gnupg"
+          echo "use-agent" > "$HOME/.gnupg/gpg.conf"
+          echo "pinentry-mode loopback" >> "$HOME/.gnupg/gpg.conf"
+          echo "allow-loopback-pinentry" > "$HOME/.gnupg/gpg-agent.conf"
+          echo "max-cache-ttl 86400" >> "$HOME/.gnupg/gpg-agent.conf"
+          echo "default-cache-ttl 86400" >> "$HOME/.gnupg/gpg-agent.conf"
+          gpgconf --kill gpg-agent
+          gpgconf --launch gpg-agent
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 --import "$GPG_KEY_PATH"
+          echo "1F34F95B4F30BC5B06E0D7CC3F619F17002790D8:6:" | gpg --import-ownertrust
+          
+          gpg --batch --yes --export $GPG_KEY_ID >~/.gnupg/pubring.gpg
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 --export-secret-keys $GPG_KEY_ID >~/.gnupg/secring.gpg
+        env:
+          GPG_KEY_ID: ${{ vars.GPG_KEY_ID }}
+          GPG_KEY: ${{ secrets.GPG_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_PATH: "${{ runner.temp }}/private.key"
 
       - name: Package helm-secrets
         run: tar --transform 's,^,helm-secrets/,' --exclude=contrib --exclude=examples --exclude=tests --exclude=helm-secrets.tar.gz -zcvf helm-secrets.tar.gz *
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@latest
+      - name: Package helm-secrets-cli
+        run: |
+          rm -rf scripts
+          cp -a ../../scripts .
+          helm plugin package . --sign --passphrase-file - --key "mail@jkroepke.de" --keyring ~/.gnupg/secring.gpg <<< "$GPG_PASSPHRASE"
+        working-directory: plugins/helm-secrets-cli
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-          body: |-
-            # CHANGELOG
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
-            * https://github.com/jkroepke/helm-secrets/blob/${{ steps.get_version.outputs.VERSION }}/CHANGELOG.md
+      - name: Package helm-secrets-getter
+        run: |
+          rm -rf scripts
+          cp -a ../../scripts .
+          helm plugin package . --sign --passphrase-file - --key "mail@jkroepke.de" --keyring ~/.gnupg/secring.gpg <<< "$GPG_PASSPHRASE"
+        working-directory: plugins/helm-secrets-getter
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
-      - name: Upload Release Asset
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1.0.2
+      - name: Package helm-secrets-post-renderer
+        run: |
+          rm -rf scripts
+          cp -a ../../scripts .
+          helm plugin package . --sign --passphrase-file - --key "mail@jkroepke.de" --keyring ~/.gnupg/secring.gpg <<< "$GPG_PASSPHRASE"
+        working-directory: plugins/helm-secrets-post-renderer
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Create Release
+        run: |
+          gh release create ${{ github.ref_name }} \
+            -t "Release ${{ github.ref_name }}" \
+            -n "# CHANGELOG
+
+          * https://github.com/jkroepke/helm-secrets/blob/${{ github.ref_name }}/CHANGELOG.md" \
+            ${{ contains(github.ref_name, 'rc') && '--prerelease' || '--latest' }} \
+          helm-secrets.tar.gz \
+          plugins/helm-secrets-cli/secrets-*.tgz \
+          plugins/helm-secrets-cli/secrets-*.tgz.prov \
+          plugins/helm-secrets-getter/secrets-getter-*.tgz \
+          plugins/helm-secrets-getter/secrets-getter-*.tgz.prov \
+          plugins/helm-secrets-post-renderer/secrets-post-renderer-*.tgz \
+          plugins/helm-secrets-post-renderer/secrets-post-renderer-*.tgz.prov
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
-          asset_path: ./helm-secrets.tar.gz
-          asset_name: helm-secrets.tar.gz
-          asset_content_type: application/tar+gzip
+
+      - name: Push secrets to OCI registry
+        run: |
+          oras push ghcr.io/${{ github.repository }}/secrets:${TAG#v} \
+              --artifact-type application/vnd.helm.plugin.v1+json \
+              secrets-*.tgz secrets-*.tgz.prov
+        working-directory: plugins/helm-secrets-cli/
+        env:
+          TAG: ${{ github.ref_name }}
+
+      - name: Push secrets-getter to OCI registry
+        run: |
+          oras push ghcr.io/${{ github.repository }}/secrets-getter:${TAG#v} \
+              --artifact-type application/vnd.helm.plugin.v1+json \
+              secrets-getter-*.tgz secrets-getter-*.tgz.prov
+        working-directory: plugins/helm-secrets-getter/
+        env:
+          TAG: ${{ github.ref_name }}
+
+      - name: Push secrets-post-renderer to OCI registry
+        run: |
+          oras push ghcr.io/${{ github.repository }}/secrets-post-renderer:${TAG#v} \
+              --artifact-type application/vnd.helm.plugin.v1+json \
+              secrets-post-renderer-*.tgz secrets-post-renderer-*.tgz.prov
+        working-directory: plugins/helm-secrets-post-renderer/
+        env:
+          TAG: ${{ github.ref_name }}
+
+      - name: Push secrets to OCI registry latest
+        if: "!contains(github.ref_name, 'rc')"
+        run: |
+          oras push ghcr.io/${{ github.repository }}/secrets:latest \
+              --artifact-type application/vnd.helm.plugin.v1+json \
+              secrets-*.tgz secrets-*.tgz.prov
+        working-directory: plugins/helm-secrets-cli/
+
+      - name: Push secrets-getter to OCI registry latest
+        if: "!contains(github.ref_name, 'rc')"
+        run: |
+          oras push ghcr.io/${{ github.repository }}/secrets-getter:latest \
+              --artifact-type application/vnd.helm.plugin.v1+json \
+              secrets-getter-*.tgz secrets-getter-*.tgz.prov
+        working-directory: plugins/helm-secrets-getter/
+
+      - name: Push secrets-post-renderer to OCI registry latest
+        if: "!contains(github.ref_name, 'rc')"
+        run: |
+          oras push ghcr.io/${{ github.repository }}/secrets-post-renderer:latest \
+              --artifact-type application/vnd.helm.plugin.v1+json \
+              secrets-post-renderer-*.tgz secrets-post-renderer-*.tgz.prov
+        working-directory: plugins/helm-secrets-post-renderer/
+
+  docs:
+    name: Set latest version
+    runs-on: ubuntu-latest
+    if: "!contains(github.ref_name, 'rc')"
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+    - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      with:
+        persist-credentials: 'false'
+
+    - run: >-
+        sed -i 's/HELM_SECRETS_VERSION=".*"/HELM_SECRETS_VERSION="'${GITHUB_REF_NAME/v}'"/g' docs/ArgoCD\ Integration.md
+    - run: >-
+        sed -i -e '/- name: HELM_SECRETS_VERSION/{n;d;}' docs/ArgoCD\ Integration.md
+    - run: >-
+        sed -i -e '/- name: HELM_SECRETS_VERSION/a\'$'\n''          value: "'${GITHUB_REF_NAME/v}'"' docs/ArgoCD\ Integration.md
+    - run: >-
+        sed -i "s/--version .*/--version ${GITHUB_REF_NAME}/g" docs/Installation.md
+    - run: >-
+        sed -i "s!/v.+[.].+[.].+[.]/!/${GITHUB_REF_NAME}!g" docs/Installation.md
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
+      with:
+        commit-message: "[docs] Set version to ${{ github.ref_name }}"
+        title: "[docs] Set version to ${{ github.ref_name }}"
+        delete-branch: true
+        base: main
+        branch: docs/${{ github.ref_name }}

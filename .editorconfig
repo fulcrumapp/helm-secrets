@@ -4,8 +4,11 @@ root = true
 end_of_line = lf
 insert_final_newline = true
 
-[*.cmd]
+[sh.cmd]
 end_of_line = crlf
+
+[password.txt]
+insert_final_newline = false
 
 [*.{sh,bats,bash}]
 indent_style = space
@@ -16,5 +19,11 @@ trim_trailing_whitespace = true
 [*.sh]
 shell_variant = posix
 
-[*.{bash,bats}]
+[*.yaml]
+indent_size = 2
+
+[*.bash]
 shell_variant = bash
+
+[*.bats]
+shell_variant = bats

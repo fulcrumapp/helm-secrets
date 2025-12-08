@@ -5,49 +5,34 @@ set -euf
 is_help() {
     case "$1" in
     -h | --help | help)
-        return 0
+        true
         ;;
     *)
-        return 1
+        false
         ;;
     esac
 }
 
-error() {
+log() {
     if [ $# -le 1 ]; then
-        printf '%s' "${1:-}" >&2
+        printf '[helm-secrets] %s\n' "${1:-}" >&2
     else
         format="${1}"
         shift
 
         # shellcheck disable=SC2059
-        printf "$format" "$@" >&2
+        printf "[helm-secrets] $format\n" "$@" >&2
     fi
+}
+
+error() {
+    log "$@"
+}
+
+fatal() {
+    error "$@"
 
     exit 1
-}
-
-on_macos() {
-    [ "$(uname)" = "Darwin" ]
-}
-
-load_secret_driver() {
-    driver="${1}"
-    if [ -f "${SCRIPT_DIR}/drivers/${driver}.sh" ]; then
-        # shellcheck source=scripts/drivers/sops.sh
-        . "${SCRIPT_DIR}/drivers/${driver}.sh"
-    else
-        # Allow to load out of tree drivers.
-        if [ ! -f "${driver}" ]; then
-            error "Can't find secret driver: ${driver}"
-        fi
-
-        # shellcheck disable=SC2034
-        HELM_SECRETS_SCRIPT_DIR="${SCRIPT_DIR}"
-
-        # shellcheck source=tests/assets/custom-driver.sh
-        . "${driver}"
-    fi
 }
 
 _regex_escape() {
@@ -61,18 +46,117 @@ _trap() {
         _trap_hook
     fi
 
+    if [ -n "${_GNUPGHOME+x}" ]; then
+        if [ -f "${_GNUPGHOME}/.helm-secrets" ]; then
+            # On CentOS 7, there is no kill option
+            case $(gpgconf --help 2>&1) in
+            *--kill*)
+                gpgconf --kill gpg-agent
+                ;;
+            esac
+        fi
+    fi
+
     rm -rf "${TMPDIR}"
 }
 
 # MacOS syntax and behavior is different for mktemp
 # https://unix.stackexchange.com/a/555214
 _mktemp() {
-    mktemp "$@" "${TMPDIR}/XXXXXX"
+    # ksh/posh - @: parameter not set
+    # https://stackoverflow.com/a/35242773
+    if [ $# -eq 0 ]; then
+        mktemp "${TMPDIR}/XXXXXX"
+    else
+        mktemp "$@" "${TMPDIR}/XXXXXX"
+    fi
 }
 
-# MacOS syntax is different for in-place
-# https://unix.stackexchange.com/a/92907/433641
-case $(sed --help 2>&1) in
-*BusyBox* | *GNU*) _sed_i() { sed -i "$@"; } ;;
-*) _sed_i() { sed -i '' "$@"; } ;;
+_gpg_load_keys() {
+    _GNUPGHOME=$(_mktemp -d)
+    touch "${_GNUPGHOME}/.helm-secrets"
+
+    export GNUPGHOME="${_GNUPGHOME}"
+    for key in ${LOAD_GPG_KEYS}; do
+        if [ -d "${key}" ]; then
+            set +f
+            for file in "${key%%/}/"*; do
+                gpg --batch --no-permission-warning --quiet --import "${file}"
+            done
+            set -f
+        else
+            gpg --batch --no-permission-warning --quiet --import "${key}"
+        fi
+    done
+}
+
+on_wsl() { false; }
+on_cygwin() { false; }
+_sed_i() { sed -i "$@"; }
+_winpath() { printf '%s' "${1}"; }
+_helm_winpath() { printf '%s' "${1}"; }
+_helm_bin() { printf '%s' "${HELM_BIN}"; }
+
+case "$(uname -s)" in
+CYGWIN* | MINGW64_NT*)
+    HELM_BIN="$(cygpath -u "${HELM_BIN}")"
+
+    on_cygwin() { true; }
+    _winpath() {
+        if [ "${2:-0}" = "1" ]; then
+            printf '%s' "${1}" | cygpath -w -l -f - | sed -e 's!\\!\\\\!g'
+        else
+            printf '%s' "${1}" | cygpath -w -l -f -
+        fi
+    }
+
+    _helm_winpath() { _winpath "$@"; }
+    _helm_bin() { _winpath "${HELM_BIN}"; }
+
+    _sed_i 's!  - command: .*!  - command: "scripts/wrapper/run.cmd downloader"!' "${HELM_PLUGIN_DIR}/plugin.yaml"
+    ;;
+Darwin)
+    case $(sed --help 2>&1) in
+    *BusyBox* | *GNU*) ;;
+    *) _sed_i() { sed -i '' "$@"; } ;;
+    esac
+    ;;
+*)
+    # Check of WSL
+    if [ -f /proc/version ] && grep -qi microsoft /proc/version; then
+        on_wsl() { true; }
+        _winpath() {
+            touch "${1}"
+            if [ "${2:-0}" = "1" ]; then
+                wslpath -w "${1}" | sed -e 's!\\!\\\\!g'
+            else
+                wslpath -w "${1}"
+            fi
+        }
+
+        # We are on a Linux VM, but helm.exe (Win32) is called
+        case "${HELM_BIN}" in
+        *.exe)
+            _helm_winpath() { _winpath "$@"; }
+
+            _sed_i 's!  - command: .*!  - command: "scripts/wrapper/run.cmd downloader"!' "${HELM_PLUGIN_DIR}/plugin.yaml"
+            ;;
+        esac
+    fi
+    ;;
+esac
+
+case $("${HELM_BIN}" version --short) in
+v2*)
+    _helm_version() { echo 2; }
+    ;;
+v3*)
+    _helm_version() { echo 3; }
+    ;;
+v4*)
+    _helm_version() { echo 4; }
+    ;;
+*)
+    fatal "Unsupported helm version: $("${HELM_BIN}" version --short)"
+    ;;
 esac

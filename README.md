@@ -1,252 +1,203 @@
 [![CI](https://github.com/jkroepke/helm-secrets/workflows/CI/badge.svg)](https://github.com/jkroepke/helm-secrets/)
 [![License](https://img.shields.io/github/license/jkroepke/helm-secrets.svg)](https://github.com/jkroepke/helm-secrets/blob/main/LICENSE)
-[![Current Release](https://img.shields.io/github/release/jkroepke/helm-secrets.svg)](https://github.com/jkroepke/helm-secrets/releases/latest)
+[![Current Release](https://img.shields.io/github/release/jkroepke/helm-secrets.svg?logo=github)](https://github.com/jkroepke/helm-secrets/releases/latest)
+[![GitHub Repo stars](https://img.shields.io/github/stars/jkroepke/helm-secrets?style=flat&logo=github)](https://github.com/jkroepke/helm-secrets/stargazers)
 [![GitHub all releases](https://img.shields.io/github/downloads/jkroepke/helm-secrets/total?logo=github)](https://github.com/jkroepke/helm-secrets/releases/latest)
 [![GitHub issues](https://img.shields.io/github/issues/jkroepke/helm-secrets.svg)](https://github.com/jkroepke/helm-secrets/issues)
 [![GitHub pull requests](https://img.shields.io/github/issues-pr/jkroepke/helm-secrets.svg)](https://github.com/jkroepke/helm-secrets/pulls)
 [![codecov](https://codecov.io/gh/jkroepke/helm-secrets/branch/main/graph/badge.svg?token=4qAukyB2yX)](https://codecov.io/gh/jkroepke/helm-secrets)
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/secrets)](https://artifacthub.io/packages/helm-plugin/secrets/secrets)
 
 # helm-secrets
 
-## Is this a fork of _futuresimple/helm-secrets_ or _zendesk/helm-secrets_?
+⭐ Don't forget to star this repository! ⭐
 
-Yes. This repository is a fork of [zendesk/helm-secrets](https://github.com/zendesk/helm-secrets) (base commit [edffea3c94c9ed70891f838b3d881d3578f2599f](https://github.com/jkroepke/helm-secrets/commit/edffea3c94c9ed70891f838b3d881d3578f2599f)).
+## About
 
-This original helm-secrets project has been [abandoned](https://github.com/zendesk/helm-secrets/issues/100) and officially [deprecated](https://github.com/zendesk/helm-secrets/pull/168). I have decided to maintain this for as I use this projects on my customer projects, and I also want to learn how unit tests for a shell language works.
+helm-secrets is a Helm plugin to decrypt encrypted Helm **value files** on the fly.
 
-This project is officially listed as a [community project](https://helm.sh/docs/community/related/) in the Helm documentation.
+* Use [sops](https://github.com/getsops/sops) to encrypt value files and store them in git.
+* Store your secrets in a cloud native secret manager like AWS SecretManager, Azure KeyVault or HashiCorp Vault and inject them inside value files or templates.
+* Use helm-secret in your favorite deployment tool or GitOps Operator like ArgoCD
+
+Who’s actually using helm-secrets? If you are using helm-secrets in your company or organization, we would like to invite you to create a PR to add your
+information to this [file](./USERS.md).
+
+## Installation
+
+See [Installation](https://github.com/jkroepke/helm-secrets/wiki/Installation) for more information.
 
 ## Usage
 
-### Decrypt secrets via plugin command
-
-Wraps the whole helm command. Slow on multiple value files.
-
-```bash
-helm secrets upgrade name . -f secrets.yaml
-```
+For full documentation, read [GitHub wiki](https://github.com/jkroepke/helm-secrets/wiki/Usage).
 
 ### Decrypt secrets via protocol handler
 
-Run decrypted command on specific value files.
+Run decrypted command on specific value files. 
+This method is preferred over the plugin command below. 
+This mode is used in [ArgoCD](https://github.com/jkroepke/helm-secrets/wiki/ArgoCD-Integration) environments.
 
 ```bash
 helm upgrade name . -f secrets://secrets.yaml
 ```
 
-See: [USAGE.md](USAGE.md) for more information
+See [Usage](https://github.com/jkroepke/helm-secrets/wiki/Usage) for more information
 
-## Installation and Dependencies
+### Decrypt secrets via plugin command
 
-### SOPS
-
-If you use sops with helm-secrets, the sops CLI tool is needed.
-
-You can install it manually using Homebrew:
+Wraps the whole `helm` command. Slow on multiple value files.
 
 ```bash
-brew install sops
+helm secrets upgrade name . -f secrets.yaml
 ```
 
-Download: https://github.com/mozilla/sops/releases/latest
 
-### Hashicorp Vault
+### Evaluate secret reference inside helm template
 
-If you use Vault with helm-secrets, the vault CLI tool is needed.
+*requires helm 3.9+; vals 0.20+*
 
-You can install it manually using Homebrew:
+helm-secrets supports evaluating [vals](https://github.com/variantdev/vals) expressions inside Helm templates with the flag `--evaluate-templates`.
+
+**secrets.yaml**
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: secret
+type: Opaque
+stringData:
+  password: "ref+awsssm://foo/bar?mode=singleparam#/BAR"
+```
+
+**Run**
+```bash
+helm secrets --evaluate-templates upgrade name .
+```
+
+## Cloud support
+
+Use AWS Secrets Manager or Azure KeyVault for storing secrets securely and reference them inside values.yaml
 
 ```bash
-brew install vault
+helm secrets --backend vals template bitnami/mysql --name-template mysql \
+  --set auth.rootPassword=ref+awsssm://foo/bar?mode=singleparam#/BAR
 ```
 
-Download: https://www.vaultproject.io/downloads
+See [Cloud Integration](https://github.com/jkroepke/helm-secrets/wiki/Cloud-Integration) for more information.
 
-### envsubst
 
-If you have stored you secret inside environment variables, you could use the envsubst driver.
+## ArgoCD support
 
-```bash
-brew install gettext
+For running helm-secrets with ArgoCD, see [ArgoCD Integration](https://github.com/jkroepke/helm-secrets/wiki/ArgoCD-Integration) for more information.
+
+### Example
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app
+spec:
+  source:
+    helm:
+      valueFiles:
+        - secrets+gpg-import:///helm-secrets-private-keys/key.asc?secrets.yaml
+        - secrets+gpg-import-kubernetes://argocd/helm-secrets-private-keys#key.asc?secrets.yaml
+        - secrets://secrets.yaml
+      # fileParameters (--set-file) are supported, too. 
+      fileParameters:
+        - name: config
+          path: secrets://secrets.yaml
+        # directly reference values from Cloud Providers
+        - name: mysql.rootPassword
+          path: secrets+literal://ref+azurekeyvault://my-vault/secret-a
 ```
 
-### SOPS git diff
+## Terraform support
 
-Git config part is installed with the plugin, but to be fully functional the following needs to be added to the `.gitattributes` file in the root directory of a charts repo:
+The Terraform Helm provider does not [support downloader plugins](https://github.com/hashicorp/terraform-provider-helm).
 
-```
-secrets.yaml diff=sopsdiffer
-secrets.*.yaml diff=sopsdiffer
-```
+helm-secrets can be used together with the [Terraform external data source provider](https://registry.terraform.io/providers/hashicorp/external/latest/docs/data-sources/data_source).
 
-More info on [sops page](https://github.com/mozilla/sops#showing-diffs-in-cleartext-in-git)
+### Example
 
-By default, helm plugin install does this for you.
+```hcl
+data "external" "helm-secrets" {
+  program = ["helm", "secrets", "decrypt", "--terraform", "../../examples/sops/secrets.yaml"]
+}
 
-### Using Helm plugin manager
+resource "helm_release" "example" {
+  
 
-Install a specific version (recommend)
-```bash
-helm plugin install https://github.com/jkroepke/helm-secrets --version v3.6.0
-```
-
-Install latest unstable version from main branch
-```bash
-helm plugin install https://github.com/jkroepke/helm-secrets
+  values = [
+    file("../../examples/sops/values.yaml"),
+    base64decode(data.external.helm-secrets.result.content_base64),
+  ]
+}
 ```
 
-Find the latest version here: https://github.com/jkroepke/helm-secrets/releases
+An example of how to use helm-secrets with Terraform can be found in [examples/terraform](examples/terraform/helm.tf).
 
-### Manual installation
+## Secret backends
 
-#### Latest version
+helm-secrets support multiple secret backends.
+Currently, [sops](https://github.com/getsops/sops) and [vals](https://github.com/variantdev/vals/) are supported.
 
-Windows (inside cmd, needs to be verified)
-```bash
-curl -LsSf https://github.com/jkroepke/helm-secrets/releases/latest/download/helm-secrets.tar.gz | tar -C "%APPDATA%\helm\plugins" -xzf-
-```
-MacOS / Linux
-```bash
-curl -LsSf https://github.com/jkroepke/helm-secrets/releases/latest/download/helm-secrets.tar.gz | tar -C "$(helm env HELM_PLUGINS)" -xzf-
-```
+See [Secret-Backends](https://github.com/jkroepke/helm-secrets/wiki/Secret-Backends) how to use them.
 
-#### Specific version
+## Documentation
 
-Windows (inside cmd, needs to be verified)
-```bash
-curl -LsSf https://github.com/jkroepke/helm-secrets/releases/download/v3.6.0/helm-secrets.tar.gz | tar -C "%APPDATA%\helm\plugins" -xzf-
-```
-MacOS / Linux
-```bash
-curl -LsSf https://github.com/jkroepke/helm-secrets/releases/download/v3.6.0/helm-secrets.tar.gz | tar -C "$(helm env HELM_PLUGINS)" -xzf-
-```
-
-### Installation on Helm 2
-
-Helm 2 doesn't support downloading plugins. Since unknown keys in `plugin.yaml` are fatal plugin installation needs special handling.
-
-Error on Helm 2 installation:
-
-```
-# helm plugin install https://github.com/jkroepke/helm-secrets
-Error: yaml: unmarshal errors:
-  line 12: field platformCommand not found in type plugin.Metadata
-```
-
-Workaround:
-
-1. Install helm-secrets via [manual installation](README.md#manual-installation), but extract inside helm2 plugin directory e.g.: `$(helm home)/plugins/`
-2. Strip `platformCommand` from `plugin.yaml` like:
-   ```
-   sed -i '/platformCommand:/,+2 d' "${HELM_HOME:-"${HOME}/.helm"}/plugins/helm-secrets*/plugin.yaml"
-   ```
-3. Done
-
-Client [here](https://github.com/adorsys-containers/ci-helm/blob/f9a8a5bf8953ab876266ca39ccbdb49228e9f117/images/2.17/Dockerfile#L91) for an example!
-
-## Explicitly specify sops binary
-If sops is installed at the non-default location or if you have multiple versions of sops on your system, you can use `HELM_SECRETS_SOPS_PATH` to explicitly specify the sops binary to be used.
-
-```bash
-# Example for in-tree drivers via environment variable
-HELM_SECRETS_SOPS_PATH=/custom/location/sops helm secrets view ./tests/assets/helm_vars/secrets.yaml
-```
-
-## Change secret driver
-
-It's possible to use another secret driver then sops, e.g. Hasicorp Vault.
-
-Start by a copy of [sops driver](https://github.com/jkroepke/helm-secrets/blob/main/scripts/drivers/sops.sh) and adjust to your own needs.
-
-The custom driver can be load via `HELM_SECRETS_DRIVER` parameter or `-d` option (higher preference):
-
-Example for in-tree drivers via option
-```bash
-helm secrets -d sops view ./tests/assets/helm_vars/secrets.yaml
-```
-Example for in-tree drivers via environment variable
-```bash
-HELM_SECRETS_DRIVER=vault helm secrets view ./tests/assets/helm_vars/secrets.yaml
-```
-Example for out-of-tree drivers
-```bash
-helm secrets -d ./path/to/driver.sh view ./tests/assets/helm_vars/secrets.yaml
-```
-
-Pull Requests are much appreciated.
-
-The driver option is a global one. A file level switch isn't supported yet.
-
-## Pass additional arguments to secret driver
-
-```bash
-helm secrets -a "--verbose" view ./tests/assets/helm_vars/secrets.yaml
-```
-
-results into:
-
-```
-[PGP]    INFO[0000] Decryption succeeded                          fingerprint=D6174A02027050E59C711075B430C4E58E2BBBA3
-[SOPS]   INFO[0000] Data key recovered successfully
-[SOPS]   DEBU[0000] Decrypting tree
-[helm-secrets] Decrypt: tests/assets/values/sops/secrets.yaml
-==> Linting examples/sops
-[INFO] Chart.yaml: icon is recommended
-
-1 chart(s) linted, 0 chart(s) failed
-
-[helm-secrets] Removed: tests/assets/values/sops/secrets.yaml.dec
-```
-
-## Main features
-
-The current version of this plugin using [mozilla/sops](https://github.com/mozilla/sops/) by default as backend.
-
-[Hashicorp Vault](http://vaultproject.io/) is supported as secret source since v3.2.0, too. In addition, [sops support vault since v3.6.0 natively](https://github.com/mozilla/sops#encrypting-using-hashicorp-vault).
-
-What kind of problems this plugin solves:
-
-- Simple replaceable layer integrated with helm command for encrypting, decrypting, view secrets files stored in any place.
-- On the fly decryption and cleanup for helm install/upgrade with a helm command wrapper
-
-If you are using sops (used by default) you have some additional features:
-
-- [Support for YAML/JSON structures encryption - Helm YAML secrets files](https://github.com/mozilla/sops#important-information-on-types)
-- [Encryption per value where visual Diff should work even on encrypted files](https://github.com/mozilla/sops/blob/master/example.yaml)
-- [On the fly decryption for git diff](https://github.com/mozilla/sops#showing-diffs-in-cleartext-in-git)
-- [Multiple key management solutions like PGP, AWS KMS and GCP KMS at same time](https://github.com/mozilla/sops#using-sops-yaml-conf-to-select-kms-pgp-for-new-files)
-- [Simple adding/removing keys](https://github.com/mozilla/sops#adding-and-removing-keys)
-- [With AWS KMS permissions management for keys](https://aws.amazon.com/kms/)
-- [Secrets files directory tree separation with recursive .sops.yaml files search](https://github.com/mozilla/sops#using-sops-yaml-conf-to-select-kms-pgp-for-new-files)
-- [Extracting sub-elements from encrypted file structure](https://github.com/mozilla/sops#extract-a-sub-part-of-a-document-tree)
-- [Encrypt only part of a file if needed](https://github.com/mozilla/sops#encrypting-only-parts-of-a-file). [Example encrypted file](https://github.com/mozilla/sops/blob/master/example.yaml)
-
-An additional documentation, resources and examples can be found [here](USAGE.md).
-
-### ArgoCD support
-
-helm-secrets could detect an ArgoCD environment by the `ARGOCD_APP_NAME` environment variable. If detected, `HELM_SECRETS_QUIET` is set to `true`.
-
-### Terraform support
-
-The terraform helm provider does not [support downloader plugins](https://github.com/hashicorp/terraform-provider-helm).
-
-An example how to use helm-secrets with terraform could be found in [contrib/terraform](contrib/terraform).
+Additional documentation, resources and examples can be found [here](https://github.com/jkroepke/helm-secrets/wiki/Usage).
 
 ## Moving parts of project
 
 - [`scripts/run.sh`](scripts/run.sh) - Main helm-secrets plugin code for all helm-secrets plugin actions available in `helm secrets help` after plugin install
-- [`scripts/drivers`](scripts/drivers) - Location of the in-tree secrets drivers
+- [`scripts/backends`](scripts/lib/backends) - Location of the in-tree secrets backends
 - [`scripts/commands`](scripts/commands) - Sub Commands of `helm secrets` are defined here.
 - [`scripts/lib`](scripts/lib) - Common functions used by `helm secrets`.
 - [`scripts/wrapper`](scripts/wrapper) - Wrapper scripts for Windows systems.
-- [`tests`](tests) - Test scripts to check if all parts of the plugin work. Using test assets with PGP keys to make real tests on real data with real encryption/decryption. See [`tests/README.md`](tests/README.md) for more informations.
+- [`tests`](tests) - Test scripts to check if all parts of the plugin work. Using test assets with PGP keys to make real tests on real data with real encryption/decryption. See [`tests/README.md`](tests/README.md) for more information.
 - [`examples`](examples) - Some example secrets.yaml
 
 ## Copyright and license
 
-© 2020-2021 [Jan-Otto Kröpke (jkroepke)](https://github.com/jkroepke/helm-secrets)
+© 2020-2022 [Jan-Otto Kröpke (jkroepke)](https://github.com/jkroepke/helm-secrets)
 
 © 2017-2020 [Zendesk](https://github.com/zendesk/helm-secrets)
 
 Licensed under the [Apache License, Version 2.0](LICENSE)
+
+## Open Source Sponsors
+
+Thanks to all sponsors!
+
+* [@hegawa](https://github.com/hegawa) (25$) onetime
+* [@Zero-Down-Time](https://github.com/Zero-Down-Time) (25$) onetime
+* [@k0ste](https://github.com/k0ste) (25$) onetime
+
+## Acknowledgements
+
+Thanks to JetBrains IDEs for their support.
+
+<table>
+  <thead>
+    <tr>
+      <th><a href="https://www.jetbrains.com/?from=jkroepke">JetBrains IDEs</a></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+        <center>
+          <a href="https://www.jetbrains.com/?from=jkroepke">
+            <picture>
+              <source srcset="https://www.jetbrains.com/company/brand/img/logo_jb_dos_3.svg" media="(prefers-color-scheme: dark)">
+              <img src="https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg" style="height: 50px">
+            </picture>
+          </a>
+        </center>
+      </td>
+    </tr>
+  </tbody>
+</table>

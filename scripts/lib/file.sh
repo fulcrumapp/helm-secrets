@@ -2,6 +2,10 @@
 
 set -euf
 
+VALUES_ALLOW_SYMLINKS="${HELM_SECRETS_VALUES_ALLOW_SYMLINKS:-true}"
+VALUES_ALLOW_ABSOLUTE_PATH="${HELM_SECRETS_VALUES_ALLOW_ABSOLUTE_PATH:-true}"
+VALUES_ALLOW_PATH_TRAVERSAL="${HELM_SECRETS_VALUES_ALLOW_PATH_TRAVERSAL:-true}"
+
 # shellcheck source=scripts/lib/file/local.sh
 . "${SCRIPT_DIR}/lib/file/local.sh"
 
@@ -13,7 +17,7 @@ set -euf
 
 _file_get_protocol() {
     case "$1" in
-    http*)
+    http://* | https://*)
         echo "http"
         ;;
     *://*)
@@ -34,19 +38,59 @@ _file_exists() {
 _file_get() {
     file_type=$(_file_get_protocol "${1}")
 
+    if [ "${file_type}" = "local" ]; then
+        if [ "${VALUES_ALLOW_SYMLINKS}" = "false" ] && [ -L "${1}" ]; then
+            fatal "Values file '%s' is a symlink. Symlinks are not allowed." "${1}"
+        fi
+
+        if [ "${VALUES_ALLOW_ABSOLUTE_PATH}" = "false" ]; then
+            case "${1}" in
+            /*) fatal "Values filepath '%s' is an absolute path. Absolute paths are not allowed." "${1}" ;;
+            \\*) fatal "Values filepath '%s' is an absolute path. Absolute paths are not allowed." "${1}" ;;
+            *:*) fatal "Values filepath '%s' is an absolute path. Absolute paths are not allowed." "${1}" ;;
+            esac
+        fi
+
+        if [ "${VALUES_ALLOW_PATH_TRAVERSAL}" = "false" ]; then
+            case "${1}" in
+            *../*) fatal "Values filepath '%s' contains '..'. Path traversal is not allowed." "${1}" ;;
+            */..*) fatal "Values filepath '%s' contains '..'. Path traversal is not allowed." "${1}" ;;
+            esac
+        fi
+    fi
+
     _file_"${file_type}"_get "$@"
 }
 
-_file_put() {
-    file_type=$(_file_get_protocol "${1}")
-
-    _file_"${file_type}"_put "$@"
+_file_dec_name() {
+    _basename="$(basename "${1}")"
+    _dirname="$(dirname "${1}")"
+    _dirname="$(printf '%s' "${_dirname}" | sed 's/\//_/g')"
+    if [ "${DEC_DIR}" != "" ]; then
+        printf '%s/%s_%s%s%s' "${DEC_DIR}" "${_dirname}" "${DEC_PREFIX}" "${_basename}" "${DEC_SUFFIX}"
+    elif [ "${DECRYPT_SECRETS_IN_TMP_DIR}" = "true" ]; then
+        printf '%s/%s_%s%s%s' "${TMPDIR}" "${_dirname}" "${DEC_PREFIX}" "${_basename}" "${DEC_SUFFIX}"
+    elif [ "${1}" != "${_basename}" ]; then
+        printf '%s/%s%s%s' "$(dirname "${1}")" "${DEC_PREFIX}" "${_basename}" "${DEC_SUFFIX}"
+    else
+        printf '%s%s%s' "${DEC_PREFIX}" "${_basename}" "${DEC_SUFFIX}"
+    fi
 }
 
-_file_dec_name() {
-    if [ "${DEC_DIR}" != "" ]; then
-        printf '%s' "${DEC_DIR}/$(basename "${1}" ".yaml")${DEC_SUFFIX}"
-    else
-        printf '%s' "$(dirname "${1}")/$(basename "${1}" ".yaml")${DEC_SUFFIX}"
-    fi
+_file_get_extension() {
+    case "${1}" in
+    *.yaml | *.yaml*)
+        echo "yaml"
+        ;;
+    *.json | *.json*)
+        echo "json"
+        ;;
+    *)
+        if grep -Fxq -- "---" "${1}"; then
+            echo "yaml"
+        else
+            echo "other"
+        fi
+        ;;
+    esac
 }

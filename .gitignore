@@ -1,7 +1,15 @@
 *.iml
 /.idea/
 /tests/.tmp/
-/tests/coverage/
+coverage
+.local
 
 *.dec
 *.test
+
+.netrc
+
+test*.sh
+/vendor
+/helm
+*.tgz

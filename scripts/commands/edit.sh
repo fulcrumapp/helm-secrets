@@ -4,13 +4,13 @@ set -euf
 
 edit_usage() {
     cat <<EOF
-helm secrets edit [ --driver <driver> | -d <driver> ] <path to file>
+helm secrets [ OPTIONS ] edit <path to file>
 
 Edit encrypted secrets
 
 Decrypt encrypted file, edit and then encrypt
 
-You can use plain sops to edit - https://github.com/mozilla/sops
+You can use plain sops to edit - https://github.com/getsops/sops
 
 Example:
   $ helm secrets edit <SECRET_FILE_PATH>
@@ -27,11 +27,11 @@ edit_helper() {
     file=$(basename "$1")
 
     if [ ! -d "${dir}" ]; then
-        error 'Directory does not exist: %s\n' "${dir}"
+        fatal 'Directory does not exist: %s' "${dir}"
     fi
 
     cd "$dir"
-    driver_edit_file "yaml" "${file}"
+    backend_edit_file "yaml" "${file}"
 }
 
 edit() {
