@@ -4,11 +4,11 @@ name: CI
 env:
   WSLENV: "HELM_SECRETS_BACKEND:BATS_REPORT_FILENAME:BATS_TEST_NAME_PREFIX"
   # renovate: github=helm/helm
-  VERSION_HELM: 3.19.2
+  VERSION_HELM: 3.20.0
   # renovate: github=getsops/sops
   VERSION_SOPS: 3.11.0
   # renovate: github=helmfile/vals
-  VERSION_VALS: 0.42.6
+  VERSION_VALS: 0.43.1
 
 on:
   pull_request:
@@ -26,7 +26,7 @@ jobs:
     outputs:
       changed: ${{ steps.set-output.outputs.changed }}
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
@@ -41,9 +41,9 @@ jobs:
     needs: detect-changes
     if: "(needs.detect-changes.outputs.changed != '0' || github.event_name == 'push')"
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Run the sh-checker
-        uses: luizm/action-sh-checker@17bd25a6ee188d2b91f677060038f4ba37ba14b2 # v0.9.0
+        uses: luizm/action-sh-checker@883217215b11c1fabbf00eb1a9a041f62d74c744 # v0.10.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHELLCHECK_OPTS: -x
@@ -52,7 +52,7 @@ jobs:
           sh_checker_exclude: "tests/assets tests/bats"
 
       - name: Run the sh-checker
-        uses: luizm/action-sh-checker@17bd25a6ee188d2b91f677060038f4ba37ba14b2 # v0.9.0
+        uses: luizm/action-sh-checker@883217215b11c1fabbf00eb1a9a041f62d74c744 # v0.10.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHELLCHECK_OPTS: -x
@@ -175,7 +175,7 @@ jobs:
       # this is to fix https://github.com/actions/checkout/issues/760
       - run: git config --global --add safe.directory /__w/helm-secrets/helm-secrets
 
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
 
@@ -185,18 +185,18 @@ jobs:
           version: v${{ matrix.helm-version != '' && matrix.helm-version || env.VERSION_HELM }}
 
       - name: Setup Sops
-        uses: jkroepke/setup-sops@d18c5b2c6f7c5384431a8fdb377e3bc4ffcb9a79 # v1.3.8
+        uses: jkroepke/setup-sops@aab30729132ecb92f43cc69db332998d82027948 # v1.3.12
         with:
           version: ${{ env.VERSION_SOPS }}
 
       - name: Setup vals
-        uses: jkroepke/setup-vals@0f986563e154406c5352d0e6603c41a0a7ed4b68 # v1.5.14
+        uses: jkroepke/setup-vals@34e11c6a91bcdf7cd2451c74375817d44352e4bd # v1.5.20
         with:
           version: v${{ env.VERSION_VALS }}
 
       - name: Setup Cygwin
         if: "contains(matrix.shell, 'cygwin')"
-        uses: cygwin/cygwin-install-action@v5
+        uses: cygwin/cygwin-install-action@v6
         with:
           platform: x64
           packages: gnupg2
@@ -269,7 +269,7 @@ jobs:
           BATS_REPORT_FILENAME: TEST-vals.xml
 
       - name: Upload Test Report
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: junit-test-results-${{ strategy.job-index }}
@@ -284,15 +284,15 @@ jobs:
       BATSLIB_TEMP_PRESERVE: "0"
       BATSLIB_TEMP_PRESERVE_ON_FAILURE: "0"
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
           fetch-depth: 0
 
       - name: Setup Ruby 3.0
-        uses: ruby/setup-ruby@d697be2f83c6234b20877c3b5eac7a7f342f0d0c # v1.269.0
+        uses: ruby/setup-ruby@90be1154f987f4dc0fe0dd0feedac9e473aa4ba8 # v1.286.0
         with:
-          ruby-version: "3.4.7"
+          ruby-version: "4.0.1"
 
       - name: Setup Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
@@ -300,12 +300,12 @@ jobs:
           version: v${{ env.VERSION_HELM }}
 
       - name: Setup Sops
-        uses: jkroepke/setup-sops@d18c5b2c6f7c5384431a8fdb377e3bc4ffcb9a79 # v1.3.8
+        uses: jkroepke/setup-sops@aab30729132ecb92f43cc69db332998d82027948 # v1.3.12
         with:
           version: ${{ env.VERSION_SOPS }}
 
       - name: Setup vals
-        uses: jkroepke/setup-vals@0f986563e154406c5352d0e6603c41a0a7ed4b68 # v1.5.14
+        uses: jkroepke/setup-vals@34e11c6a91bcdf7cd2451c74375817d44352e4bd # v1.5.20
         with:
           version: v${{ env.VERSION_VALS }}
 
@@ -335,7 +335,7 @@ jobs:
           HELM_SECRETS_BACKEND: vals
           BASHCOV_COMMAND_NAME: helm-secrets:vals
 
-      - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+      - uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           files: ./coverage/coverage.xml
           fail_ci_if_error: true
@@ -351,7 +351,7 @@ jobs:
         env:
           BASHCOV_COMMAND_NAME: helm-secrets:it
 
-      - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+      - uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           files: ./coverage/coverage.xml
           fail_ci_if_error: true
@@ -374,7 +374,7 @@ jobs:
 
       - run: kubectl cluster-info
 
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
 
@@ -384,12 +384,12 @@ jobs:
           version: v${{ env.VERSION_HELM }}
 
       - name: Setup Sops
-        uses: jkroepke/setup-sops@d18c5b2c6f7c5384431a8fdb377e3bc4ffcb9a79 # v1.3.8
+        uses: jkroepke/setup-sops@aab30729132ecb92f43cc69db332998d82027948 # v1.3.12
         with:
           version: ${{ env.VERSION_SOPS }}
 
       - name: Setup vals
-        uses: jkroepke/setup-vals@0f986563e154406c5352d0e6603c41a0a7ed4b68 # v1.5.14
+        uses: jkroepke/setup-vals@34e11c6a91bcdf7cd2451c74375817d44352e4bd # v1.5.20
         with:
           version: v${{ env.VERSION_VALS }}
 
@@ -410,7 +410,7 @@ jobs:
           BATS_REPORT_FILENAME: TEST-sops.xml
 
       - name: Upload Test Report
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
           name: junit-test-results-it-${{ strategy.job-index }}
@@ -425,12 +425,12 @@ jobs:
       - unit-tests
       - integration-tests
     steps:
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: .
 
       - name: Publish Test Report
-        uses: mikepenz/action-junit-report@e08919a3b1fb83a78393dfb775a9c37f17d8eea6 # v6.0.1
+        uses: mikepenz/action-junit-report@a294a61c909bd8a4b563024a2faa28897fd53ebc # v6.1.0
         with:
           report_paths: '**/TEST-*.xml'
           detailed_summary: true
